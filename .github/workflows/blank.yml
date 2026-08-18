@@ -1,4 +1,4 @@
-name: Hassany Store - Pro Build & Sign
+name: Hassany Store Pro - VIP Edition
 
 on:
   push:
@@ -6,200 +6,261 @@ on:
   workflow_dispatch:
 
 env:
-  APP_NAME: "Hassany Store"
-  BUNDLE_ID: "com.hassany.store.app"
+  NEW_BUNDLE_ID: "com.hassany.store.pro"
+  NEW_APP_NAME:  "Hassany Store"
 
 jobs:
-  build-and-sign:
+  build:
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
-      - name: 🚀 فحص موارد السيرفر
-        run: |
-          echo "=== مساحة البناء ==="
-          df -h
-          echo "=== المعالجات المتاحة ==="
-          sysctl -n hw.ncpu
 
-      - name: 📥 جلب ملفات المستودع
+      # =========================================================
+      # 1. فحص الموارد وإعداد بيئة البناء
+      # =========================================================
+      - name: Maximize build resources
+        run: |
+          echo "=== فحص موارد السيرفر ==="
+          df -h
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🛠️ إعداد بيئة Xcode و Swift
+      - name: Setup Xcode
         run: |
+          echo "=== إعداد أحدث إصدار من Xcode ==="
           XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
-          echo "تم العثور على Xcode في المسار: $XCODE_PATH"
           sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
           xcode-select -p
           swift --version
 
-      - name: ⚙️ تثبيت أدوات التوقيع والضغط
+      - name: Install required tools
         run: |
+          echo "=== تثبيت أدوات الضغط والتوقيع ==="
           export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
-          brew install ldid zip
-          command -v ldid || { echo "ldid غير مثبت"; exit 1; }
+          brew install ldid zip 2>/dev/null || true
+          command -v ldid || { echo "ldid not installed"; exit 1; }
+          mkdir -p Resources
 
-      - name: 📂 إنشاء هيكلية مجلدات المشروع
+      # =========================================================
+      # 2. توليد ملفات النظام (Info.plist)
+      # =========================================================
+      - name: Generate Info.plist
         run: |
-          mkdir -p HassanyStore/Resources
-          mkdir -p HassanyStore/Sources
-          mkdir -p build-output/Payload
-
-      - name: 📝 توليد ملف Info.plist
-        run: |
-          cat > HassanyStore/Resources/Info.plist << 'EOF'
+          echo "=== كتابة إعدادات نظام iOS ==="
+          cat > Resources/Info.plist << 'PEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-              <key>CFBundleName</key> <string>${{ env.APP_NAME }}</string>
-              <key>CFBundleDisplayName</key> <string>${{ env.APP_NAME }}</string>
-              <key>CFBundleIdentifier</key> <string>${{ env.BUNDLE_ID }}</string>
-              <key>CFBundleVersion</key> <string>1</string>
-              <key>CFBundleShortVersionString</key> <string>1.0</string>
-              <key>CFBundleExecutable</key> <string>HassanyStoreApp</string>
+              <key>CFBundleDevelopmentRegion</key> <string>ar</string>
+              <key>CFBundleExecutable</key> <string>HassanyStore</string>
+              <key>CFBundleIdentifier</key> <string>${{ env.NEW_BUNDLE_ID }}</string>
+              <key>CFBundleName</key> <string>Hassany</string>
+              <key>CFBundleDisplayName</key> <string>${{ env.NEW_APP_NAME }}</string>
               <key>CFBundlePackageType</key> <string>APPL</string>
+              <key>CFBundleShortVersionString</key> <string>2.0</string>
+              <key>CFBundleVersion</key> <string>1</string>
               <key>LSRequiresIPhoneOS</key> <true/>
               <key>MinimumOSVersion</key> <string>15.0</string>
+              <key>UIApplicationSceneManifest</key>
+              <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
               <key>UIBackgroundModes</key>
-              <array>
-                  <string>fetch</string>
-                  <string>remote-notification</string>
-              </array>
-              <key>UIDeviceFamily</key>
-              <array><integer>1</integer><integer>2</integer></array>
-              <key>UILaunchScreen</key> <dict/>
-              <key>UISupportedInterfaceOrientations</key>
-              <array><string>UIInterfaceOrientationPortrait</string></array>
+              <array><string>fetch</string><string>remote-notification</string></array>
+              <key>UIUserInterfaceStyle</key> <string>Dark</string>
               <key>NSAppTransportSecurity</key>
               <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
-              <key>UIUserInterfaceStyle</key> <string>Dark</string>
-              <key>NSCameraUsageDescription</key> 
-              <string>نحتاج الكاميرا لمسح كود التفعيل الخاص بالمتجر.</string>
+              <key>NSCameraUsageDescription</key>
+              <string>يستخدم المتجر الكاميرا لمسح رموز الاشتراك.</string>
+              <key>NSPhotoLibraryAddUsageDescription</key>
+              <string>لحفظ لقطات الشاشة للتطبيقات المعدلة.</string>
           </dict>
           </plist>
-          EOF
+          PEOF
 
-      - name: 🎨 توليد ملف الثيم والألوان
+      # =========================================================
+      # 3. الثوابت والألوان (Hassany VIP Theme)
+      # =========================================================
+      - name: Generate Constants.swift (Theme)
         run: |
-          cat > HassanyStore/Sources/Constants.swift << 'EOF'
+          echo "=== توليد ثيم المتجر الخاص ==="
+          cat > Constants.swift << 'VIPEOF'
           import SwiftUI
 
-          struct AppTheme {
-              static let bgDark = Color(red: 0.04, green: 0.04, blue: 0.06)
-              static let cardDark = Color(red: 0.08, green: 0.08, blue: 0.12)
-              static let accentPrimary = Color(red: 0.0, green: 0.47, blue: 1.0)
-              static let accentSecondary = Color(red: 0.88, green: 0.1, blue: 0.4)
-              static let textMain = Color.white
-              static let textSub = Color.white.opacity(0.6)
-              static let glassBackground = Color.white.opacity(0.05)
-              static let glassStroke = Color.white.opacity(0.1)
+          struct AppConstants {
+              static let appVersion = "2.0 Pro"
+              static let storeName  = "Hassany Store"
+              static let userDefaultsKey = "HassanyStoreUserData"
+              static let feedPageSize: Int = 200
           }
 
-          struct Constants {
-              static let storeName = "Hassany Store"
-              static let version = "1.0 Pro"
-              static let supabaseURL = "SUPABASE_URL_HERE"
-              static let supabaseAnonKey = "SUPABASE_KEY_HERE"
+          struct ThemeManager {
+              // الألوان الملكية الخاصة بالمتجر
+              static let bg = Color(red: 0.05, green: 0.05, blue: 0.07) // أسود ملكي
+              static let card = Color(red: 0.10, green: 0.10, blue: 0.13) // أسود زجاجي للبطاقات
+              static let cardAlt = Color(red: 0.13, green: 0.13, blue: 0.16)
+              static let primary = Color(red: 1.0, green: 0.84, blue: 0.0) // ذهبي VIP
+              static let primaryDk = Color(red: 0.85, green: 0.65, blue: 0.0)
+              static let accent = Color(red: 0.0, green: 0.9, blue: 1.0) // نيون أزرق (Cyan)
+              static let text = Color.white
+              static let subText = Color.white.opacity(0.6)
+              static let divider = Color.white.opacity(0.1)
           }
 
-          struct GlassModifier: ViewModifier {
-              var radius: CGFloat = 20
-              func body(content: Content) -> some View {
-                  content
-                      .background(AppTheme.glassBackground)
-                      .cornerRadius(radius)
-                      .overlay(RoundedRectangle(cornerRadius: radius).stroke(AppTheme.glassStroke, lineWidth: 1))
-                      .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+          extension Color {
+              static var storeBg: Color { ThemeManager.bg }
+              static var storeCard: Color { ThemeManager.card }
+              static var storeCardAlt: Color { ThemeManager.cardAlt }
+              static var storePrimary: Color { ThemeManager.primary }
+              static var storeAccent: Color { ThemeManager.accent }
+              static var storeText: Color { ThemeManager.text }
+              static var storeSub: Color { ThemeManager.subText }
+              static var storeDivider: Color { ThemeManager.divider }
+          }
+
+          // تصميم التدرج الذهبي للأزرار
+          struct GoldTheme {
+              static var gradient: LinearGradient {
+                  LinearGradient(
+                      gradient: Gradient(colors: [Color.storePrimary, Color.storePrimaryDk]),
+                      startPoint: .topLeading, endPoint: .bottomTrailing)
               }
+              static let radius: CGFloat = 18
           }
+          VIPEOF
 
-          extension View {
-              func glassCard(radius: CGFloat = 20) -> some View {
-                  self.modifier(GlassModifier(radius: radius))
-              }
-          }
-          EOF
-
-      - name: 📊 توليد ملف هيكل البيانات
+      # =========================================================
+      # 4. النماذج وقواعد البيانات (Models.swift)
+      # =========================================================
+      - name: Generate Models.swift
         run: |
-          cat > HassanyStore/Sources/Models.swift << 'EOF'
+          echo "=== توليد هيكلية قواعد بيانات التطبيقات ==="
+          cat > Models.swift << 'VIPEOF'
           import Foundation
 
-          struct StoreApp: Codable, Identifiable {
-              let id: String
-              let name: String
-              let bundleId: String
-              let version: String
-              let size: String
-              let iconUrl: String
-              let downloadUrl: String
-              let category: String
-              let description: String
+          struct AppUser: Codable {
+              let id: UUID
+              let phoneNumber: String
+              let username: String
+              let createdAt: Date
           }
 
-          struct ActivationCode: Codable {
-              let code: String
-              let deviceUdid: String
-              let isActive: Bool
-              let expiresAt: Date
-          }
-          EOF
-
-      - name: 📱 توليد واجهة التطبيق
-        run: |
-          cat > HassanyStore/Sources/ContentView.swift << 'EOF'
-          import SwiftUI
-
-          @main
-          struct HassanyStoreApp: App {
-              var body: some Scene {
-                  WindowGroup {
-                      VStack(spacing: 20) {
-                          Image(systemName: "applelogo")
-                              .font(.system(size: 60))
-                              .foregroundColor(AppTheme.accentPrimary)
-                          
-                          Text("مرحباً بك في Hassany Store")
-                              .font(.title)
-                              .fontWeight(.bold)
-                              .foregroundColor(.white)
-                          
-                          Text("تم بناء التطبيق بنجاح عبر GitHub Actions!")
-                              .font(.subheadline)
-                              .foregroundColor(AppTheme.textSub)
-                      }
-                      .frame(maxWidth: .infinity, maxHeight: .infinity)
-                      .background(AppTheme.bgDark.ignoresSafeArea())
-                  }
+          struct StoreAPIResponse: Codable {
+              let lastUpdated: String?
+              let apps: [StoreAPIApp]
+              
+              enum CodingKeys: String, CodingKey {
+                  case lastUpdated = "last_updated"
+                  case apps
               }
           }
-          EOF
 
-      - name: 🔨 تجميع الكود وصناعة التطبيق
+          struct StoreAPIApp: Codable, Identifiable, Hashable {
+              let id: Int
+              let name: String
+              let bundleId: String?
+              let bundleVersion: String?
+              let ipaSize: String?
+              let ipaUrl: String?
+              let icon: String?
+              let description: String?
+              let screenshots: [String]?
+              let category: String?
+              let updatedAt: String?
+
+              enum CodingKeys: String, CodingKey {
+                  case id, name
+                  case bundleId = "bundle_id"
+                  case bundleIdAlt = "bundleID"
+                  case bundleVersion = "bundle_version"
+                  case ipaSize = "ipa_size"
+                  case ipaUrl = "ipa_url"
+                  case downloadURL
+                  case icon, iconURL
+                  case description, localizedDescription
+                  case screenshots, category
+                  case updatedAt = "updated_at"
+              }
+
+              init(from decoder: Decoder) throws {
+                  let c = try decoder.container(keyedBy: CodingKeys.self)
+                  self.id = (try? c.decode(Int.self, forKey: .id)) ?? UUID().uuidString.hashValue
+                  self.name = (try? c.decode(String.self, forKey: .name)) ?? "تطبيق"
+                  self.bundleId = (try? c.decode(String.self, forKey: .bundleId)) ?? (try? c.decode(String.self, forKey: .bundleIdAlt))
+                  self.bundleVersion = try? c.decode(String.self, forKey: .bundleVersion)
+                  self.ipaSize = try? c.decode(String.self, forKey: .ipaSize)
+                  self.ipaUrl = (try? c.decode(String.self, forKey: .ipaUrl)) ?? (try? c.decode(String.self, forKey: .downloadURL))
+                  self.icon = (try? c.decode(String.self, forKey: .icon)) ?? (try? c.decode(String.self, forKey: .iconURL))
+                  self.description = (try? c.decode(String.self, forKey: .description)) ?? (try? c.decode(String.self, forKey: .localizedDescription))
+                  self.screenshots = try? c.decode([String].self, forKey: .screenshots)
+                  self.category = try? c.decode(String.self, forKey: .category)
+                  self.updatedAt = try? c.decode(String.self, forKey: .updatedAt)
+              }
+              
+              var cleanSize: String {
+                  if let s = ipaSize, !s.isEmpty { return s }
+                  return "مجهول"
+              }
+              
+              var cleanDescription: String {
+                  return description ?? "حصرياً على Hassany Store - قم بتحميل النسخة المعدلة والمفتوحة المزايا."
+              }
+          }
+          VIPEOF
+
+      # =========================================================
+      # 5. محرك تحميل الصور والأيقونات الذكي
+      # =========================================================
+      - name: Generate ImageCache.swift
         run: |
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun swiftc \
-            HassanyStore/Sources/Constants.swift \
-            HassanyStore/Sources/Models.swift \
-            HassanyStore/Sources/ContentView.swift \
-            -sdk "$SDK" \
-            -target arm64-apple-ios15.0 \
-            -O -module-name HassanyStore \
-            -framework SwiftUI -framework UIKit -framework Foundation \
-            -o build-output/HassanyStoreApp
+          echo "=== توليد محرك الصور (Image Cache) ==="
+          cat > ImageCache.swift << 'VIPEOF'
+          import SwiftUI
 
-      - name: 📦 إنشاء ملف الـ IPA
-        run: |
-          mkdir -p build-output/Payload/HassanyStore.app
-          cp build-output/HassanyStoreApp build-output/Payload/HassanyStore.app/
-          cp HassanyStore/Resources/Info.plist build-output/Payload/HassanyStore.app/
-          cd build-output
-          zip -r -q HassanyStore.ipa Payload
-          echo "✅ تم إنشاء ملف HassanyStore.ipa بنجاح"
+          @MainActor
+          final class RemoteIconCache: ObservableObject {
+              static let shared = RemoteIconCache()
+              @Published private(set) var cache: [String: UIImage] = [:]
+              private let memCache = NSCache<NSString, UIImage>()
+              
+              func image(for urlString: String?) -> UIImage? {
+                  guard let s = urlString, !s.isEmpty, let url = URL(string: s) else { return nil }
+                  if let hit = cache[s] { return hit }
+                  if let hit = memCache.object(forKey: s as NSString) { return hit }
+                  
+                  Task {
+                      if let (data, _) = try? await URLSession.shared.data(from: url),
+                         let img = UIImage(data: data) {
+                          self.memCache.setObject(img, forKey: s as NSString)
+                          self.cache[s] = img
+                      }
+                  }
+                  return nil
+              }
+          }
 
-      - name: 📤 رفع ملف الـ IPA للتحميل
-        uses: actions/upload-artifact@v4
-        with:
-          name: HassanyStore-App
-          path: build-output/HassanyStore.ipa
-          retention-days: 7
+          struct RemoteIcon: View {
+              let url: String?
+              var size: CGFloat = 60
+              var cornerRadius: CGFloat = 16
+              @ObservedObject private var cache = RemoteIconCache.shared
+
+              var body: some View {
+                  Group {
+                      if let img = cache.image(for: url) {
+                          Image(uiImage: img)
+                              .resizable()
+                              .aspectRatio(contentMode: .fill)
+                      } else {
+                          RoundedRectangle(cornerRadius: cornerRadius)
+                              .fill(Color.storeCardAlt)
+                              .overlay(Image(systemName: "app.dashed").foregroundColor(.storeSub))
+                      }
+                  }
+                  .frame(width: size, height: size)
+                  .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+              }
+          }
+          VIPEOF
