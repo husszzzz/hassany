@@ -162,3 +162,74 @@ jobs:
               let expiresAt: Date
           }
           EOF
+                # =========================================================
+      # 4. واجهة التطبيق الرئيسية (ContentView.swift)
+      # =========================================================
+      - name: 📱 توليد واجهة التطبيق
+        run: |
+          cat > HassanyStore/Sources/ContentView.swift << 'EOF'
+          import SwiftUI
+
+          @main
+          struct HassanyStoreApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      VStack(spacing: 20) {
+                          Image(systemName: "applelogo")
+                              .font(.system(size: 60))
+                              .foregroundColor(AppTheme.accentPrimary)
+                          
+                          Text("مرحباً بك في Hassany Store")
+                              .font(.title)
+                              .fontWeight(.bold)
+                              .foregroundColor(.white)
+                          
+                          Text("تم بناء التطبيق بنجاح عبر GitHub Actions!")
+                              .font(.subheadline)
+                              .foregroundColor(AppTheme.textSub)
+                      }
+                      .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      .background(AppTheme.bgDark.ignoresSafeArea())
+                  }
+              }
+          }
+          EOF
+
+      # =========================================================
+      # 5. تجميع التطبيق (Build)
+      # =========================================================
+      - name: 🔨 تجميع الكود وصناعة التطبيق (Compile)
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun swiftc \
+            HassanyStore/Sources/Constants.swift \
+            HassanyStore/Sources/Models.swift \
+            HassanyStore/Sources/ContentView.swift \
+            -sdk "$SDK" \
+            -target arm64-apple-ios15.0 \
+            -O -module-name HassanyStore \
+            -framework SwiftUI -framework UIKit -framework Foundation \
+            -o build-output/HassanyStoreApp
+
+      # =========================================================
+      # 6. تحزيم التطبيق إلى صيغة IPA
+      # =========================================================
+      - name: 📦 إنشاء ملف الـ IPA
+        run: |
+          mkdir -p build-output/Payload/HassanyStore.app
+          cp build-output/HassanyStoreApp build-output/Payload/HassanyStore.app/
+          cp HassanyStore/Resources/Info.plist build-output/Payload/HassanyStore.app/
+          cd build-output
+          zip -r -q HassanyStore.ipa Payload
+          echo "✅ تم إنشاء ملف HassanyStore.ipa بنجاح"
+
+      # =========================================================
+      # 7. تصدير ملف الـ IPA للتحميل (Artifact)
+      # =========================================================
+      - name: 📤 رفع ملف الـ IPA للتحميل
+        uses: actions/upload-artifact@v4
+        with:
+          name: HassanyStore-App
+          path: build-output/HassanyStore.ipa
+          retention-days: 7
+
