@@ -24,11 +24,14 @@ jobs:
       - name: 📥 جلب ملفات المستودع
         uses: actions/checkout@v4
 
-      - name: 🛠️ إعداد بيئة Xcode و Swift
+           - name: 🛠️ إعداد بيئة Xcode و Swift
         run: |
-          sudo xcode-select --switch /Applications/Xcode_15.2.app/Contents/Developer
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "تم العثور على Xcode في المسار: $XCODE_PATH"
+          sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
           xcode-select -p
           swift --version
+
 
       - name: ⚙️ تثبيت أدوات التوقيع والضغط
         run: |
