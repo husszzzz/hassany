@@ -1,13 +1,13 @@
-name: Hassany Store Pro - VIP Edition
+name: Hassany Store - Pro Edition
 
-on:
+"on":
   push:
     branches: [ main ]
   workflow_dispatch:
 
 env:
   NEW_BUNDLE_ID: "com.hassany.store.pro"
-  NEW_APP_NAME:  "Hassany Store"
+  NEW_APP_NAME:  "Hassany"
 
 jobs:
   build:
@@ -15,14 +15,16 @@ jobs:
     timeout-minutes: 120
     steps:
 
-      # =========================================================
-      # 1. فحص الموارد وإعداد بيئة البناء
-      # =========================================================
-      - name: Maximize build resources
+      # =============== الخطوة 1: فحص الموارد وإعداد بيئة البناء ===============
+      - name: Maximize build resources (1TB+ capacity)
         run: |
-          echo "=== فحص موارد السيرفر ==="
+          echo "=== Build capacity check ==="
           df -h
+          echo "=== macOS resource limits ==="
+          ulimit -a
+          echo "=== Available CPUs ==="
           sysctl -n hw.ncpu
+          echo "=== Available memory ==="
           sysctl -n hw.memsize
 
       - name: Checkout repository
@@ -30,113 +32,520 @@ jobs:
 
       - name: Setup Xcode
         run: |
-          echo "=== إعداد أحدث إصدار من Xcode ==="
           XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "Using Xcode: $XCODE_PATH"
           sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
           xcode-select -p
           swift --version
 
       - name: Install required tools
         run: |
-          echo "=== تثبيت أدوات الضغط والتوقيع ==="
           export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
           brew install ldid zip 2>/dev/null || true
           command -v ldid || { echo "ldid not installed"; exit 1; }
-          mkdir -p Resources
+          command -v zip || { echo "zip not installed"; exit 1; }
 
-      # =========================================================
-      # 2. توليد ملفات النظام (Info.plist)
-      # =========================================================
+      # =============== الخطوة 2: تحميل وتوليد الصور الخاصة بالمتجر ===============
+      - name: Download project images
+        run: |
+          mkdir -p Resources
+          curl -L -o Resources/login_logo.png      "https://up6.cc/2026/07/178463790906632.png"
+          curl -L -o Resources/register_logo.png   "https://up6.cc/2026/07/178463790901181.png"
+          curl -L -o Resources/alerts_onboarding1.gif "https://up6.cc/2026/07/178467158819014.gif"
+          curl -L -o Resources/alerts_onboarding2.gif "https://up6.cc/2026/07/178467158813032.gif"
+          curl -L -o Resources/alerts_onboarding3.gif "https://up6.cc/2026/07/17846720131242.gif"
+          curl -L -o Resources/no_internet.gif         "https://up6.cc/2026/07/178493307055591.gif"
+          curl -L -o Resources/thanks_overlay.gif      "https://up6.cc/2026/07/178480321212891.gif"
+          curl -L -o Resources/store_icon.gif          "https://up6.cc/2026/08/178554033779411.gif"
+          curl -L -o Resources/header_logo.png     "https://up6.cc/2026/08/178601927933882.png"
+          curl -L -o Resources/appstore_glyph.png  "https://up6.cc/2026/08/178602172173251.png"
+          curl -L -o Resources/detail_icon_bg.gif      "https://up6.cc/2026/08/178602194400281.png"
+          file Resources/*.png Resources/*.gif 2>/dev/null || true
+          ls -lh Resources
+
+      - name: Generate feature images (no UDID, no wallet)
+        run: |
+          python3 -m pip install --quiet --break-system-packages Pillow 2>/dev/null || true
+          python3 << 'PYEOF'
+          from PIL import Image, ImageDraw, ImageFont
+          import os, random
+          os.makedirs("Resources", exist_ok=True)
+          random.seed(42)
+
+          def gradient(w, h, c1, c2, vertical=True):
+              img = Image.new("RGBA", (w, h), c1 + (255,))
+              d = ImageDraw.Draw(img)
+              steps = h if vertical else w
+              for i in range(steps):
+                  t = i / max(1, steps - 1)
+                  r = int(c1[0] + (c2[0] - c1[0]) * t)
+                  g = int(c1[1] + (c2[1] - c1[1]) * t)
+                  b = int(c1[2] + (c2[2] - c1[2]) * t)
+                  d.line([(0, i), (w, i)] if vertical else [(i, 0), (i, h)], fill=(r, g, b, 255))
+              return img
+
+          def rounded_card(w, h, radius, fill, shadow=True):
+              img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+              d = ImageDraw.Draw(img)
+              if shadow:
+                  d.rounded_rectangle((4, 8, w - 4, h - 4), radius=radius, fill=(0, 0, 0, 60))
+              body = (4, 4, w - 5, h - 5) if shadow else (0, 0, w - 1, h - 1)
+              d.rounded_rectangle(body, radius=radius, fill=fill)
+              return img
+
+          def find_font(size):
+              for p in [
+                  "/System/Library/Fonts/Helvetica.ttc",
+                  "/System/Library/Fonts/SFNSDisplay.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                  "/Library/Fonts/Arial Bold.ttf",
+              ]:
+                  if os.path.exists(p):
+                      try: return ImageFont.truetype(p, size)
+                      except: pass
+              return ImageFont.load_default()
+
+          def text_centered(d, txt, x, y, font, fill):
+              try:
+                  bbox = d.textbbox((0, 0), txt, font=font)
+                  w = bbox[2] - bbox[0]; h = bbox[3] - bbox[1]
+              except AttributeError:
+                  w, h = d.textsize(txt, font=font)
+              if isinstance(fill, tuple) and len(fill) == 4 and getattr(d, "_image", None) is not None:
+                  if d._image.mode == "RGB":
+                      fill = fill[:3]
+              d.text((x - w // 2, y - h // 2), txt, font=font, fill=fill)
+
+          def write_image(path, img):
+              if img.mode == "RGBA":
+                  bg = Image.new("RGB", img.size, (255, 255, 255))
+                  bg.paste(img, mask=img.split()[-1])
+                  img = bg
+              img.save(path, "PNG", optimize=True)
+              return img
+
+          W, H = 900, 1400
+          def onboarding(text_title, text_body, accent):
+              base = gradient(W, H, (20, 20, 25), (10, 10, 15)) # Darkened onboarding background
+              d = ImageDraw.Draw(base)
+              d.rounded_rectangle((80, 200, W - 80, 900), radius=40, fill=accent)
+              text_centered(d, text_title, W // 2, 350, find_font(60), (255, 255, 255))
+              text_centered(d, "*", W // 2, 560, find_font(80), (255, 255, 255))
+              for i, line in enumerate(text_body.split("\n")):
+                  text_centered(d, line, W // 2, 1050 + i * 70, find_font(34), (200, 200, 210))
+              for i in range(3):
+                  x = W // 2 - 60 + i * 60
+                  d.ellipse((x, 1280, x + 30, 1310), fill=(100, 100, 120))
+              d.ellipse((W // 2 - 15, 1280, W // 2 + 15, 1310), fill=(217, 165, 33)) # Gold indicator
+              return base
+
+          for i, (t, b, c) in enumerate([
+              ("Hassany Plus", "Get access to exclusive\napps and features.", (217, 165, 33)),
+              ("Direct Install", "Install apps directly\nwithout a computer.", (0, 120, 255)),
+              ("Daily Updates", "Enjoy new tweaks\nand games daily.", (20, 20, 30)),
+          ]):
+              write_image(f"Resources/wallet_advanced_onb{i+1}.png", onboarding(t, b, c))
+
+          ico = gradient(1024, 1024, (20, 20, 25), (10, 10, 15))
+          d = ImageDraw.Draw(ico)
+          d.rounded_rectangle((120, 120, 904, 904), radius=180, fill=(217, 165, 33))
+          d.rounded_rectangle((220, 340, 804, 700), radius=30, fill=(20, 20, 25))
+          d.text((260, 380), "H", font=find_font(280), fill=(217, 165, 33))
+          write_image("Resources/feature_app_icon.png", ico)
+          print("All feature images generated.")
+          PYEOF
+          ls -lh Resources | tail -30
+
+      - name: Generate app icons from the logo image
+        run: |
+          python3 -m pip install --quiet --break-system-packages Pillow
+          python3 << 'PYEOF'
+          from PIL import Image
+          src = Image.open("Resources/login_logo.png").convert("RGBA")
+          def make_icon(size, path):
+              bg = Image.new("RGBA", (size, size), (10, 12, 18, 255))
+              logo = src.resize((size, size))
+              bg.alpha_composite(logo)
+              bg.convert("RGB").save(path, "PNG")
+          make_icon(120,  "Resources/AppIcon60x60@2x.png")
+          make_icon(180,  "Resources/AppIcon60x60@3x.png")
+          make_icon(152,  "Resources/AppIcon76x76@2x~ipad.png")
+          make_icon(167,  "Resources/AppIcon83.5x83.5@2x~ipad.png")
+          make_icon(1024, "Resources/AppIcon1024x1024.png")
+          PYEOF
+          ls -lh Resources
+
+      # =============== الخطوة 3: ملفات النظام (Info.plist) ===============
       - name: Generate Info.plist
         run: |
-          echo "=== كتابة إعدادات نظام iOS ==="
           cat > Resources/Info.plist << 'PEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-              <key>CFBundleDevelopmentRegion</key> <string>ar</string>
-              <key>CFBundleExecutable</key> <string>HassanyStore</string>
-              <key>CFBundleIdentifier</key> <string>${{ env.NEW_BUNDLE_ID }}</string>
-              <key>CFBundleName</key> <string>Hassany</string>
-              <key>CFBundleDisplayName</key> <string>${{ env.NEW_APP_NAME }}</string>
-              <key>CFBundlePackageType</key> <string>APPL</string>
-              <key>CFBundleShortVersionString</key> <string>2.0</string>
-              <key>CFBundleVersion</key> <string>1</string>
-              <key>LSRequiresIPhoneOS</key> <true/>
-              <key>MinimumOSVersion</key> <string>15.0</string>
-              <key>UIApplicationSceneManifest</key>
-              <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+              <key>CFBundleDevelopmentRegion</key>     <string>ar</string>
+              <key>CFBundleAllowMixedLocalizations</key> <true/>
+              <key>CFBundleLocalizations</key>
+              <array><string>ar</string><string>en</string></array>
+              <key>CFBundleExecutable</key>            <string>HassanyStoreApp</string>
+              <key>CFBundleIdentifier</key>            <string>${{ env.NEW_BUNDLE_ID }}</string>
+              <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
+              <key>CFBundleName</key>                  <string>Hassany</string>
+              <key>CFBundleDisplayName</key>            <string>${{ env.NEW_APP_NAME }}</string>
+              <key>CFBundlePackageType</key>            <string>APPL</string>
+              <key>CFBundleSignature</key>              <string>????</string>
+              <key>CFBundleShortVersionString</key>     <string>2.0</string>
+              <key>CFBundleVersion</key>                <string>1</string>
+              <key>CFBundleSupportedPlatforms</key>
+              <array><string>iPhoneOS</string></array>
+              <key>LSRequiresIPhoneOS</key>             <true/>
+              <key>UIFileSharingEnabled</key>            <true/>
+              <key>LSSupportsOpeningDocumentsInPlace</key> <true/>
               <key>UIBackgroundModes</key>
-              <array><string>fetch</string><string>remote-notification</string></array>
-              <key>UIUserInterfaceStyle</key> <string>Dark</string>
+              <array>
+                  <string>remote-notification</string>
+                  <string>fetch</string>
+                  <string>processing</string>
+              </array>
+              <key>BGTaskSchedulerPermittedIdentifiers</key>
+              <array>
+                  <string>com.hassany.store.refresh</string>
+              </array>
+              <key>NSUserNotificationsUsageDescription</key>
+              <string>نُبلغك برموز التحقق وحالة التنزيل والتوقيع.</string>
+              <key>LSApplicationQueriesSchemes</key>
+              <array>
+                  <string>itms-services</string>
+                  <string>itms-apps</string>
+              </array>
+              <key>MinimumOSVersion</key>               <string>15.0</string>
+              <key>UIDeviceFamily</key>
+              <array><integer>1</integer><integer>2</integer></array>
+              <key>UIRequiredDeviceCapabilities</key>
+              <array><string>arm64</string></array>
+              <key>UISupportedInterfaceOrientations</key>
+              <array><string>UIInterfaceOrientationPortrait</string></array>
+              <key>UIPrerenderedIcon</key>              <true/>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UIRequiresFullScreen</key>          <true/>
+              <key>UIStatusBarHidden</key>             <false/>
+              <key>UIViewControllerBasedStatusBarAppearance</key><false/>
+              <key>UIApplicationSceneManifest</key>
+              <dict>
+                  <key>UIApplicationSupportsMultipleScenes</key><false/>
+              </dict>
+              <key>UIApplicationSupportsIndirectInputEvents</key><true/>
+              <key>CFBundleURLTypes</key>
+              <array>
+                  <dict>
+                      <key>CFBundleURLName</key>
+                      <string>com.hassany.store.pro</string>
+                      <key>CFBundleURLSchemes</key>
+                      <array>
+                          <string>hassany</string>
+                      </array>
+                  </dict>
+              </array>
+              <!-- Light mode only (dark mode disabled) -->
+              <key>UIUserInterfaceStyle</key>
+              <string>Dark</string>
               <key>NSAppTransportSecurity</key>
-              <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
               <key>NSCameraUsageDescription</key>
-              <string>يستخدم المتجر الكاميرا لمسح رموز الاشتراك.</string>
+              <string>يستخدم Hassany Store الكاميرا لمسح رموز التفعيل.</string>
+              <key>NSPhotoLibraryUsageDescription</key>
+              <string>يستخدم Hassany Store مكتبة الصور لحفظ الصور.</string>
               <key>NSPhotoLibraryAddUsageDescription</key>
-              <string>لحفظ لقطات الشاشة للتطبيقات المعدلة.</string>
+              <string>يحفظ Hassany Store لقطات الشاشة لتتمكن من مشاركتها.</string>
           </dict>
           </plist>
           PEOF
 
-      # =========================================================
-      # 3. الثوابت والألوان (Hassany VIP Theme)
-      # =========================================================
-      - name: Generate Constants.swift (Theme)
+      # =============== الخطوة 4: الترجمة واللغات (Localization.swift) ===============
+      - name: Generate code - Localization.swift
         run: |
-          echo "=== توليد ثيم المتجر الخاص ==="
+          cat > Localization.swift << 'LANGEOF'
+          import SwiftUI
+          import Foundation
+          import Combine
+
+          /// مفتاح اللغة المحفوظ على الجهاز.
+          public let kAppLanguageKey = "app_language_v1"
+
+          public final class LanguageManager: ObservableObject {
+              public static let shared = LanguageManager()
+
+              @Published public var isArabic: Bool {
+                  didSet {
+                      UserDefaults.standard.set(isArabic ? "ar" : "en", forKey: kAppLanguageKey)
+                  }
+              }
+
+              private init() {
+                  UserDefaults.standard.set("ar", forKey: kAppLanguageKey)
+                  isArabic = true
+              }
+
+              public static var currentCode: String { "ar" }
+              public var locale: Locale { Locale(identifier: "ar") }
+              public var layout: LayoutDirection { .rightToLeft }
+              public var title: String { "العربية" }
+
+              public func toggle() { isArabic.toggle() }
+          }
+
+          /// جدول الترجمة: المفتاح هو النص العربي (تم تغيير الاسم لـ Hassany Store).
+          let HassanyEnglishStrings: [String: String] = [
+              "متجر Hassany": "Hassany Store",
+              "رمز تحقق Hassany": "Hassany verification code",
+              "الرئيسية": "Home",
+              "المفضلة": "Favorites",
+              "الملفات": "Files",
+              "التطبيقات": "Apps",
+              "المتجر": "Store",
+              "المصادر": "Sources",
+              "بحث": "Search",
+              "الكل": "All",
+              "تثبيت": "Install",
+              "تخطي": "Skip",
+              "التالي": "Next",
+              "رجوع": "Back",
+              "تأكيد": "Confirm",
+              "إلغاء": "Cancel",
+              "حفظ": "Save",
+              "إغلاق": "Close",
+              "الإعدادات": "Settings",
+              "الحساب": "Account",
+              "قيّم Hassany": "Rate Hassany",
+              "الملف الشخصي": "Profile",
+          ]
+
+          public func LS(_ ar: String) -> String {
+              return ar
+          }
+          LANGEOF
+
+      # =============== الخطوة 5: الثيم والألوان (Constants.swift) ===============
+      - name: Generate code - Constants.swift
+        run: |
           cat > Constants.swift << 'VIPEOF'
           import SwiftUI
 
           struct AppConstants {
               static let appVersion = "2.0 Pro"
               static let storeName  = "Hassany Store"
-              static let userDefaultsKey = "HassanyStoreUserData"
+              static let userDefaultsKey = "HassanyProUserData"
+              static let hasSeenOnboardingKey = "hasSeenOnboardingHassany"
+              static let maxFeedCacheBytes: Int = 256 * 1024 * 1024
+              static let maxIconCacheBytes: Int = 512 * 1024 * 1024
               static let feedPageSize: Int = 200
           }
 
-          struct ThemeManager {
-              // الألوان الملكية الخاصة بالمتجر
-              static let bg = Color(red: 0.05, green: 0.05, blue: 0.07) // أسود ملكي
-              static let card = Color(red: 0.10, green: 0.10, blue: 0.13) // أسود زجاجي للبطاقات
-              static let cardAlt = Color(red: 0.13, green: 0.13, blue: 0.16)
-              static let primary = Color(red: 1.0, green: 0.84, blue: 0.0) // ذهبي VIP
-              static let primaryDk = Color(red: 0.85, green: 0.65, blue: 0.0)
-              static let accent = Color(red: 0.0, green: 0.9, blue: 1.0) // نيون أزرق (Cyan)
-              static let text = Color.white
-              static let subText = Color.white.opacity(0.6)
-              static let divider = Color.white.opacity(0.1)
+          func dyn(_ light: (CGFloat, CGFloat, CGFloat), _ dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+              Color(UIColor(red: dark.0, green: dark.1, blue: dark.2, alpha: 1))
+          }
+
+          // ===== THEME ENGINE - VIP Dark Palette =====
+          struct ThemePalette: Identifiable, Equatable {
+              let id: Int
+              let name: String
+              let primary: (CGFloat, CGFloat, CGFloat)
+              let primaryDk: (CGFloat, CGFloat, CGFloat)
+              let accent: (CGFloat, CGFloat, CGFloat)
+              let blush: (CGFloat, CGFloat, CGFloat)
+              let yellow: (CGFloat, CGFloat, CGFloat)
+              let cyan: (CGFloat, CGFloat, CGFloat)
+              let bg: (CGFloat, CGFloat, CGFloat)
+              let card: (CGFloat, CGFloat, CGFloat)
+              let cardAlt: (CGFloat, CGFloat, CGFloat)
+              let text: (CGFloat, CGFloat, CGFloat)
+              let sub: (CGFloat, CGFloat, CGFloat)
+              let divider: (CGFloat, CGFloat, CGFloat)
+
+              static func == (a: ThemePalette, b: ThemePalette) -> Bool { a.id == b.id }
+
+              var primaryHex: String { ThemePalette.hex(primary) }
+              var accentHex: String { ThemePalette.hex(accent) }
+              var darkHex: String { ThemePalette.hex(primaryDk) }
+              var cyanHex: String { ThemePalette.hex(cyan) }
+              var blushHex: String { ThemePalette.hex(blush) }
+              var yellowHex: String { ThemePalette.hex(yellow) }
+              var bgHex: String { ThemePalette.hex(bg) }
+              var cardHex: String { ThemePalette.hex(card) }
+              var cardAltHex: String { ThemePalette.hex(cardAlt) }
+              var textHex: String { ThemePalette.hex(text) }
+              var subHex: String { ThemePalette.hex(sub) }
+              var dividerHex: String { ThemePalette.hex(divider) }
+
+              static func hex(_ c: (CGFloat, CGFloat, CGFloat)) -> String {
+                  let r = Int(max(0, min(1, c.0)) * 255)
+                  let g = Int(max(0, min(1, c.1)) * 255)
+                  let b = Int(max(0, min(1, c.2)) * 255)
+                  return String(format: "#%02X%02X%02X", r, g, b)
+              }
+          }
+
+          enum ThemeCatalog {
+              static let all: [ThemePalette] = [
+               ThemePalette(id: 0, name: "ملكي زجاجي",
+                            primary: (0.85, 0.65, 0.13), // Gold
+                            primaryDk: (0.65, 0.45, 0.0), // Dark Gold
+                            accent: (0.0, 0.47, 1.0), // Sapphire Blue
+                            blush: (0.07, 0.07, 0.1), // Very dark blue
+                            yellow: (1.0, 0.84, 0.0),
+                            cyan: (0.0, 0.9, 1.0),
+                            bg: (0.03, 0.03, 0.04), // Almost black
+                            card: (0.08, 0.08, 0.1), // Glass dark
+                            cardAlt: (0.12, 0.12, 0.15),
+                            text: (1.0, 1.0, 1.0),
+                            sub: (0.6, 0.6, 0.65),
+                            divider: (0.15, 0.15, 0.18))
+              ]
+              static func palette(_ id: Int) -> ThemePalette {
+                  all.first(where: { $0.id == id }) ?? all[0]
+              }
+          }
+
+          final class ThemeManager: ObservableObject {
+              static let shared = ThemeManager()
+              private let key = "selectedThemeHassany"
+              @Published var current: ThemePalette
+
+              private init() {
+                  current = ThemeCatalog.palette(0)
+              }
+
+              func select(_ id: Int) {
+                  UserDefaults.standard.set(id, forKey: key)
+                  withAnimation(.easeInOut(duration: 0.3)) {
+                      current = ThemeCatalog.palette(id)
+                  }
+              }
+              static var p: ThemePalette { ThemeManager.shared.current }
+          }
+
+          func rgb(_ c: (CGFloat, CGFloat, CGFloat)) -> Color {
+              Color(UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1))
           }
 
           extension Color {
-              static var storeBg: Color { ThemeManager.bg }
-              static var storeCard: Color { ThemeManager.card }
-              static var storeCardAlt: Color { ThemeManager.cardAlt }
-              static var storePrimary: Color { ThemeManager.primary }
-              static var storeAccent: Color { ThemeManager.accent }
-              static var storeText: Color { ThemeManager.text }
-              static var storeSub: Color { ThemeManager.subText }
-              static var storeDivider: Color { ThemeManager.divider }
+              static var xcodeBackground: Color { rgb(ThemeManager.p.bg) }
+              static var xcodeEditor: Color     { rgb(ThemeManager.p.card) }
+              static var xcodeBlue: Color       { rgb(ThemeManager.p.primary) }
+              static var xcodeAccent: Color     { rgb(ThemeManager.p.primary) }
+              static var xcodeGreen: Color      { rgb(ThemeManager.p.cyan) }
+              static var xcodeOrange: Color     { rgb(ThemeManager.p.yellow) }
+              static let xcodeRed               = Color(red: 0.90, green: 0.28, blue: 0.32)
+              static var xcodeSecondary: Color  { rgb(ThemeManager.p.sub) }
+              static var xcodeDivider: Color    { rgb(ThemeManager.p.divider) }
+              static var storeAccent: Color     { rgb(ThemeManager.p.primary) }
+
+              static var storeBg: Color       { rgb(ThemeManager.p.bg) }
+              static var storeCard: Color     { rgb(ThemeManager.p.card) }
+              static var storeCardAlt: Color  { rgb(ThemeManager.p.cardAlt) }
+              static var storeText: Color     { rgb(ThemeManager.p.text) }
+              static var storeSub: Color      { rgb(ThemeManager.p.sub) }
+              static var storeDivider: Color  { rgb(ThemeManager.p.divider) }
           }
 
-          // تصميم التدرج الذهبي للأزرار
-          struct GoldTheme {
-              static var gradient: LinearGradient {
-                  LinearGradient(
-                      gradient: Gradient(colors: [Color.storePrimary, Color.storePrimaryDk]),
-                      startPoint: .topLeading, endPoint: .bottomTrailing)
+          extension UIImage {
+              static func bundled(_ filename: String) -> UIImage? {
+                  guard let path = Bundle.main.path(forResource: filename, ofType: nil) else { return nil }
+                  return UIImage(contentsOfFile: path)
               }
-              static let radius: CGFloat = 18
           }
           VIPEOF
 
-      # =========================================================
-      # 4. النماذج وقواعد البيانات (Models.swift)
-      # =========================================================
-      - name: Generate Models.swift
+      # =============== الخطوة 6: التفاعل الحسي (HapticManager.swift) ===============
+      - name: Generate code - HapticManager.swift
         run: |
-          echo "=== توليد هيكلية قواعد بيانات التطبيقات ==="
+          cat > HapticManager.swift << 'VIPEOF'
+          import SwiftUI
+          import UIKit
+
+          class HapticManager {
+              static let shared = HapticManager()
+              func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+                  UIImpactFeedbackGenerator(style: style).impactOccurred()
+              }
+              func notification(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+                  UINotificationFeedbackGenerator().notificationOccurred(type)
+              }
+              func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+              func success() { notification(.success) }
+              func error() { notification(.error) }
+          }
+
+          struct XcodeCardModifier: ViewModifier {
+              var radius: CGFloat = 12
+              func body(content: Content) -> some View {
+                  content
+                      .background(
+                          RoundedRectangle(cornerRadius: radius)
+                              .fill(Color.xcodeEditor)
+                              .overlay(
+                                  RoundedRectangle(cornerRadius: radius)
+                                      .stroke(Color.xcodeDivider, lineWidth: 0.5)
+                              )
+                      )
+                      .clipShape(RoundedRectangle(cornerRadius: radius))
+              }
+          }
+
+          extension View {
+              func xcodeCard(radius: CGFloat = 12) -> some View {
+                  modifier(XcodeCardModifier(radius: radius))
+              }
+          }
+
+          final class ScreenCaptureService: ObservableObject {
+              static let shared = ScreenCaptureService()
+
+              @Published var lastScreenshot: UIImage? = nil
+              @Published var showThanksOverlay: Bool = false
+
+              private var observer: NSObjectProtocol?
+
+              private init() {}
+
+              func start() {
+                  guard observer == nil else { return }
+                  observer = NotificationCenter.default.addObserver(
+                      forName: UIApplication.userDidTakeScreenshotNotification,
+                      object: nil,
+                      queue: .main
+                  ) { [weak self] _ in
+                      guard let self = self else { return }
+                      self.lastScreenshot = self.loadLatestScreenshotFromPhotos()
+                      self.showThanksOverlay = true
+                      HapticManager.shared.success()
+                  }
+              }
+
+              func stop() {
+                  if let obs = observer {
+                      NotificationCenter.default.removeObserver(obs)
+                      observer = nil
+                  }
+              }
+
+              func dismissOverlay() {
+                  showThanksOverlay = false
+              }
+
+              private func loadLatestScreenshotFromPhotos() -> UIImage? {
+                  return nil
+              }
+          }
+          VIPEOF
+
+      # =============== الخطوة 7: نماذج البيانات (Models.swift) ===============
+      - name: Generate code - Models.swift
+        run: |
           cat > Models.swift << 'VIPEOF'
           import Foundation
 
@@ -144,16 +553,59 @@ jobs:
               let id: UUID
               let phoneNumber: String
               let username: String
+              let password: String
               let createdAt: Date
+
+              init(phoneNumber: String, username: String, password: String) {
+                  self.id = UUID()
+                  self.phoneNumber = phoneNumber
+                  self.username = username
+                  self.password = password
+                  self.createdAt = Date()
+              }
           }
 
           struct StoreAPIResponse: Codable {
               let lastUpdated: String?
               let apps: [StoreAPIApp]
-              
+
               enum CodingKeys: String, CodingKey {
                   case lastUpdated = "last_updated"
                   case apps
+              }
+
+              init(from decoder: Decoder) throws {
+                  let c = try decoder.container(keyedBy: CodingKeys.self)
+
+                  self.lastUpdated = try? c.decode(String.self, forKey: .lastUpdated)
+
+                  if let arr = try? c.decode([StoreAPIApp].self, forKey: .apps) {
+                      self.apps = arr
+                      return
+                  }
+
+                  struct Envelope: Codable {
+                      let success: Bool?
+                      let count: Int?
+                      let apps: [StoreAPIApp]
+                  }
+                  if let env = try? c.decode(Envelope.self, forKey: .apps) {
+                      self.apps = env.apps
+                      return
+                  }
+
+                  if let one = try? c.decode(StoreAPIApp.self, forKey: .apps) {
+                      self.apps = [one]
+                      return
+                  }
+
+                  self.apps = []
+              }
+
+              func encode(to encoder: Encoder) throws {
+                  var c = encoder.container(keyedBy: CodingKeys.self)
+                  try c.encodeIfPresent(lastUpdated, forKey: .lastUpdated)
+                  try c.encode(apps, forKey: .apps)
               }
           }
 
@@ -163,104 +615,170 @@ jobs:
               let bundleId: String?
               let bundleVersion: String?
               let ipaSize: String?
+              let githubUrl: String?
+              let archiveUrl: String?
               let ipaUrl: String?
+              let host: String?
               let icon: String?
               let description: String?
               let screenshots: [String]?
               let category: String?
+              let createdAt: String?
               let updatedAt: String?
+
+              let downloadURL: String?
+              let down: String?
+              let iconURL: String?
+              let localizedDescription: String?
+              let developerName: String?
+              let version: String?
+              let versionDate: String?
+              let fullDate: String?
+              let size: Double?
+              let type: Int?
 
               enum CodingKeys: String, CodingKey {
                   case id, name
                   case bundleId = "bundle_id"
                   case bundleIdAlt = "bundleID"
+                  case bundleIdentifier
                   case bundleVersion = "bundle_version"
                   case ipaSize = "ipa_size"
+                  case githubUrl = "github_url"
+                  case archiveUrl = "archive_url"
                   case ipaUrl = "ipa_url"
-                  case downloadURL
-                  case icon, iconURL
-                  case description, localizedDescription
+                  case host
+                  case icon
+                  case iconURL
+                  case description
+                  case localizedDescription
                   case screenshots, category
+                  case createdAt = "created_at"
                   case updatedAt = "updated_at"
+                  case downloadURL
+                  case down
+                  case developerName
+                  case version
+                  case versionDate
+                  case fullDate
+                  case size, type
               }
 
               init(from decoder: Decoder) throws {
                   let c = try decoder.container(keyedBy: CodingKeys.self)
-                  self.id = (try? c.decode(Int.self, forKey: .id)) ?? UUID().uuidString.hashValue
-                  self.name = (try? c.decode(String.self, forKey: .name)) ?? "تطبيق"
-                  self.bundleId = (try? c.decode(String.self, forKey: .bundleId)) ?? (try? c.decode(String.self, forKey: .bundleIdAlt))
-                  self.bundleVersion = try? c.decode(String.self, forKey: .bundleVersion)
-                  self.ipaSize = try? c.decode(String.self, forKey: .ipaSize)
-                  self.ipaUrl = (try? c.decode(String.self, forKey: .ipaUrl)) ?? (try? c.decode(String.self, forKey: .downloadURL))
-                  self.icon = (try? c.decode(String.self, forKey: .icon)) ?? (try? c.decode(String.self, forKey: .iconURL))
-                  self.description = (try? c.decode(String.self, forKey: .description)) ?? (try? c.decode(String.self, forKey: .localizedDescription))
+                  if let intId = try? c.decode(Int.self, forKey: .id) {
+                      self.id = intId
+                  } else {
+                      let bundle = (try? c.decode(String.self, forKey: .bundleIdAlt))
+                          ?? (try? c.decode(String.self, forKey: .bundleIdentifier))
+                          ?? UUID().uuidString
+                      self.id = abs(bundle.hashValue)
+                  }
+                  self.name = (try? c.decode(String.self, forKey: .name)) ?? "Untitled"
+                  self.bundleId = (try? c.decode(String.self, forKey: .bundleId))
+                      ?? (try? c.decode(String.self, forKey: .bundleIdAlt))
+                      ?? (try? c.decode(String.self, forKey: .bundleIdentifier))
+                  self.bundleVersion = (try? c.decode(String.self, forKey: .bundleVersion))
+                      ?? (try? c.decode(String.self, forKey: .version))
+                  self.ipaSize = (try? c.decode(String.self, forKey: .ipaSize))
+                  self.githubUrl = (try? c.decode(String.self, forKey: .githubUrl))
+                  self.archiveUrl = (try? c.decode(String.self, forKey: .archiveUrl))
+                  self.ipaUrl = (try? c.decode(String.self, forKey: .ipaUrl))
+                      ?? (try? c.decode(String.self, forKey: .downloadURL))
+                      ?? (try? c.decode(String.self, forKey: .down))
+                  self.host = (try? c.decode(String.self, forKey: .host))
+                  self.icon = (try? c.decode(String.self, forKey: .icon))
+                      ?? (try? c.decode(String.self, forKey: .iconURL))
+                  self.description = (try? c.decode(String.self, forKey: .description))
+                      ?? (try? c.decode(String.self, forKey: .localizedDescription))
                   self.screenshots = try? c.decode([String].self, forKey: .screenshots)
-                  self.category = try? c.decode(String.self, forKey: .category)
-                  self.updatedAt = try? c.decode(String.self, forKey: .updatedAt)
+                  self.category = (try? c.decode(String.self, forKey: .category))
+                  self.createdAt = (try? c.decode(String.self, forKey: .createdAt))
+                  self.updatedAt = (try? c.decode(String.self, forKey: .updatedAt))
+                      ?? (try? c.decode(String.self, forKey: .versionDate))
+                      ?? (try? c.decode(String.self, forKey: .fullDate))
+                  self.downloadURL = (try? c.decode(String.self, forKey: .downloadURL))
+                      ?? (try? c.decode(String.self, forKey: .down))
+                  self.down = (try? c.decode(String.self, forKey: .down))
+                  self.iconURL = (try? c.decode(String.self, forKey: .iconURL))
+                  self.localizedDescription = (try? c.decode(String.self, forKey: .localizedDescription))
+                  self.developerName = (try? c.decode(String.self, forKey: .developerName))
+                  self.version = (try? c.decode(String.self, forKey: .version))
+                  self.versionDate = (try? c.decode(String.self, forKey: .versionDate))
+                  self.fullDate = (try? c.decode(String.self, forKey: .fullDate))
+                  self.size = (try? c.decode(Double.self, forKey: .size))
+                  self.type = (try? c.decode(Int.self, forKey: .type))
               }
-              
+
+              func encode(to encoder: Encoder) throws {
+                  var c = encoder.container(keyedBy: CodingKeys.self)
+                  try c.encode(id, forKey: .id)
+                  try c.encode(name, forKey: .name)
+                  try c.encodeIfPresent(bundleId, forKey: .bundleId)
+                  try c.encodeIfPresent(bundleVersion, forKey: .bundleVersion)
+                  try c.encodeIfPresent(ipaSize, forKey: .ipaSize)
+                  try c.encodeIfPresent(githubUrl, forKey: .githubUrl)
+                  try c.encodeIfPresent(archiveUrl, forKey: .archiveUrl)
+                  try c.encodeIfPresent(ipaUrl, forKey: .ipaUrl)
+                  try c.encodeIfPresent(host, forKey: .host)
+                  try c.encodeIfPresent(icon, forKey: .icon)
+                  try c.encodeIfPresent(description, forKey: .description)
+                  try c.encodeIfPresent(screenshots, forKey: .screenshots)
+                  try c.encodeIfPresent(category, forKey: .category)
+                  try c.encodeIfPresent(createdAt, forKey: .createdAt)
+                  try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+              }
+
               var cleanSize: String {
+                  if let s = size, s > 0 {
+                      let f = ByteCountFormatter()
+                      f.allowedUnits = [.useMB, .useGB, .useKB]
+                      f.countStyle = .file
+                      return f.string(fromByteCount: Int64(s))
+                  }
                   if let s = ipaSize, !s.isEmpty { return s }
-                  return "مجهول"
+                  return "-"
               }
-              
+
               var cleanDescription: String {
-                  return description ?? "حصرياً على Hassany Store - قم بتحميل النسخة المعدلة والمفتوحة المزايا."
-              }
-          }
-          VIPEOF
-
-      # =========================================================
-      # 5. محرك تحميل الصور والأيقونات الذكي
-      # =========================================================
-      - name: Generate ImageCache.swift
-        run: |
-          echo "=== توليد محرك الصور (Image Cache) ==="
-          cat > ImageCache.swift << 'VIPEOF'
-          import SwiftUI
-
-          @MainActor
-          final class RemoteIconCache: ObservableObject {
-              static let shared = RemoteIconCache()
-              @Published private(set) var cache: [String: UIImage] = [:]
-              private let memCache = NSCache<NSString, UIImage>()
-              
-              func image(for urlString: String?) -> UIImage? {
-                  guard let s = urlString, !s.isEmpty, let url = URL(string: s) else { return nil }
-                  if let hit = cache[s] { return hit }
-                  if let hit = memCache.object(forKey: s as NSString) { return hit }
-                  
-                  Task {
-                      if let (data, _) = try? await URLSession.shared.data(from: url),
-                         let img = UIImage(data: data) {
-                          self.memCache.setObject(img, forKey: s as NSString)
-                          self.cache[s] = img
-                      }
+                  let raw = description ?? localizedDescription ?? ""
+                  if raw.isEmpty {
+                      return "حصرياً على Hassany Store - النسخة المميزة مع كامل الإضافات."
                   }
-                  return nil
+                  let lines = raw.split(whereSeparator: { $0.isNewline || $0 == "\r" })
+                  return lines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+              }
+
+              var resolvedDownloadURL: String? {
+                  return ipaUrl ?? downloadURL ?? down ?? githubUrl ?? archiveUrl
               }
           }
 
-          struct RemoteIcon: View {
-              let url: String?
-              var size: CGFloat = 60
-              var cornerRadius: CGFloat = 16
-              @ObservedObject private var cache = RemoteIconCache.shared
+          struct DownloadRepository: Codable, Identifiable, Hashable {
+              let id: String
+              let name: String
+              let feedURL: String
+              let homepage: String
+              let enabled: Bool
+              let maxGB: Double
 
-              var body: some View {
-                  Group {
-                      if let img = cache.image(for: url) {
-                          Image(uiImage: img)
-                              .resizable()
-                              .aspectRatio(contentMode: .fill)
-                      } else {
-                          RoundedRectangle(cornerRadius: cornerRadius)
-                              .fill(Color.storeCardAlt)
-                              .overlay(Image(systemName: "app.dashed").foregroundColor(.storeSub))
-                      }
-                  }
-                  .frame(width: size, height: size)
-                  .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+              init(id: String, name: String, feedURL: String, homepage: String, enabled: Bool = true, maxGB: Double = 250) {
+                  self.id = id
+                  self.name = name
+                  self.feedURL = feedURL
+                  self.homepage = homepage
+                  self.enabled = enabled
+                  self.maxGB = maxGB
               }
+          }
+
+          struct DownloadQuota: Codable, Identifiable, Hashable {
+              let id: String
+              let totalBytes: Int64
+              let usedBytes: Int64
+              var freeBytes: Int64 { max(0, totalBytes - usedBytes) }
+              var freeGB: Double { Double(freeBytes) / 1_073_741_824.0 }
+              var usedGB: Double { Double(usedBytes) / 1_073_741_824.0 }
+              var totalGB: Double { Double(totalBytes) / 1_073_741_824.0 }
           }
           VIPEOF
