@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
-      - name: 🚀 فحص موارد السيرفر (Capacity Check)
+      - name: 🚀 فحص موارد السيرفر
         run: |
           echo "=== مساحة البناء ==="
           df -h
@@ -24,14 +24,13 @@ jobs:
       - name: 📥 جلب ملفات المستودع
         uses: actions/checkout@v4
 
-           - name: 🛠️ إعداد بيئة Xcode و Swift
+      - name: 🛠️ إعداد بيئة Xcode و Swift
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
           echo "تم العثور على Xcode في المسار: $XCODE_PATH"
           sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
           xcode-select -p
           swift --version
-
 
       - name: ⚙️ تثبيت أدوات التوقيع والضغط
         run: |
@@ -45,9 +44,6 @@ jobs:
           mkdir -p HassanyStore/Sources
           mkdir -p build-output/Payload
 
-      # =========================================================
-      # 1. ملف تعريف التطبيق لنظام iOS (Info.plist)
-      # =========================================================
       - name: 📝 توليد ملف Info.plist
         run: |
           cat > HassanyStore/Resources/Info.plist << 'EOF'
@@ -83,24 +79,18 @@ jobs:
           </plist>
           EOF
 
-      # =========================================================
-      # 2. ثوابت المتجر والألوان (Constants.swift)
-      # =========================================================
-      - name: 🎨 توليد ملف الثيم والألوان (Constants.swift)
+      - name: 🎨 توليد ملف الثيم والألوان
         run: |
           cat > HassanyStore/Sources/Constants.swift << 'EOF'
           import SwiftUI
 
           struct AppTheme {
-              // ألوان تناسب ستايل Hassany Store الاحترافي
               static let bgDark = Color(red: 0.04, green: 0.04, blue: 0.06)
               static let cardDark = Color(red: 0.08, green: 0.08, blue: 0.12)
-              static let accentPrimary = Color(red: 0.0, green: 0.47, blue: 1.0) // أزرق احترافي
-              static let accentSecondary = Color(red: 0.88, green: 0.1, blue: 0.4) // وردي نيون
+              static let accentPrimary = Color(red: 0.0, green: 0.47, blue: 1.0)
+              static let accentSecondary = Color(red: 0.88, green: 0.1, blue: 0.4)
               static let textMain = Color.white
               static let textSub = Color.white.opacity(0.6)
-              
-              // ستايل الزجاج (Glassmorphism)
               static let glassBackground = Color.white.opacity(0.05)
               static let glassStroke = Color.white.opacity(0.1)
           }
@@ -108,23 +98,17 @@ jobs:
           struct Constants {
               static let storeName = "Hassany Store"
               static let version = "1.0 Pro"
-              
-              // سيتم ربطها بلوحة تحكم Supabase لاحقاً
               static let supabaseURL = "SUPABASE_URL_HERE"
               static let supabaseAnonKey = "SUPABASE_KEY_HERE"
           }
 
-          // إضافة لتسهيل تصميم الزجاج في واجهات التطبيق
           struct GlassModifier: ViewModifier {
               var radius: CGFloat = 20
               func body(content: Content) -> some View {
                   content
                       .background(AppTheme.glassBackground)
                       .cornerRadius(radius)
-                      .overlay(
-                          RoundedRectangle(cornerRadius: radius)
-                              .stroke(AppTheme.glassStroke, lineWidth: 1)
-                      )
+                      .overlay(RoundedRectangle(cornerRadius: radius).stroke(AppTheme.glassStroke, lineWidth: 1))
                       .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
               }
           }
@@ -136,15 +120,11 @@ jobs:
           }
           EOF
 
-      # =========================================================
-      # 3. النماذج والبيانات (Models.swift)
-      # =========================================================
-      - name: 📊 توليد ملف هيكل البيانات (Models.swift)
+      - name: 📊 توليد ملف هيكل البيانات
         run: |
           cat > HassanyStore/Sources/Models.swift << 'EOF'
           import Foundation
 
-          // نموذج التطبيق المرفوع على المتجر
           struct StoreApp: Codable, Identifiable {
               let id: String
               let name: String
@@ -157,7 +137,6 @@ jobs:
               let description: String
           }
 
-          // نموذج كود التفعيل (الاشتراك) الخاص بالزبون
           struct ActivationCode: Codable {
               let code: String
               let deviceUdid: String
@@ -165,9 +144,7 @@ jobs:
               let expiresAt: Date
           }
           EOF
-                # =========================================================
-      # 4. واجهة التطبيق الرئيسية (ContentView.swift)
-      # =========================================================
+
       - name: 📱 توليد واجهة التطبيق
         run: |
           cat > HassanyStore/Sources/ContentView.swift << 'EOF'
@@ -198,10 +175,7 @@ jobs:
           }
           EOF
 
-      # =========================================================
-      # 5. تجميع التطبيق (Build)
-      # =========================================================
-      - name: 🔨 تجميع الكود وصناعة التطبيق (Compile)
+      - name: 🔨 تجميع الكود وصناعة التطبيق
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           xcrun swiftc \
@@ -214,9 +188,6 @@ jobs:
             -framework SwiftUI -framework UIKit -framework Foundation \
             -o build-output/HassanyStoreApp
 
-      # =========================================================
-      # 6. تحزيم التطبيق إلى صيغة IPA
-      # =========================================================
       - name: 📦 إنشاء ملف الـ IPA
         run: |
           mkdir -p build-output/Payload/HassanyStore.app
@@ -226,13 +197,9 @@ jobs:
           zip -r -q HassanyStore.ipa Payload
           echo "✅ تم إنشاء ملف HassanyStore.ipa بنجاح"
 
-      # =========================================================
-      # 7. تصدير ملف الـ IPA للتحميل (Artifact)
-      # =========================================================
       - name: 📤 رفع ملف الـ IPA للتحميل
         uses: actions/upload-artifact@v4
         with:
           name: HassanyStore-App
           path: build-output/HassanyStore.ipa
           retention-days: 7
-
