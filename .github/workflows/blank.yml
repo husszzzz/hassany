@@ -782,3 +782,414 @@ jobs:
               var totalGB: Double { Double(totalBytes) / 1_073_741_824.0 }
           }
           VIPEOF
+                # =============== الخطوة 8: إدارة المستودعات (Repositories.swift) ===============
+      - name: Generate Repositories.swift
+        run: |
+          cat > Repositories.swift << 'VIPEOF'
+          import Foundation
+          import SwiftUI
+
+          @MainActor
+          final class RepositoriesStore: ObservableObject {
+              static let shared = RepositoriesStore()
+
+              @Published private(set) var repositories: [DownloadRepository]
+              @Published private(set) var quota: DownloadQuota
+              @Published private(set) var totalAppsAvailable: Int = 0
+
+              private let keyRepos = "hassany.repositories.v1"
+              private let keyQuota = "hassany.quota.v1"
+              private let d = UserDefaults.standard
+
+              private init() {
+                  if let data = d.data(forKey: keyQuota),
+                     let decoded = try? JSONDecoder().decode(DownloadQuota.self, from: data) {
+                      self.quota = decoded
+                  } else {
+                      self.quota = DownloadQuota(id: "user-quota", totalBytes: Int64(1000) * 1_073_741_824, usedBytes: 0)
+                  }
+
+                  if let data = d.data(forKey: keyRepos),
+                     let decoded = try? JSONDecoder().decode([DownloadRepository].self, from: data) {
+                      self.repositories = decoded
+                  } else {
+                      self.repositories = [
+                          DownloadRepository(
+                              id: "hassany-main",
+                              name: "Hassany VIP Apps",
+                              feedURL: "https://project--9e6278b0-f5b2-4b14-9b4f-75f855f319c6.lovable.app/api/public/store/apps",
+                              homepage: "https://hassany.store",
+                              enabled: true,
+                              maxGB: 500
+                          )
+                      ]
+                  }
+                  self.persistRepositories()
+                  self.persistQuota()
+              }
+
+              func totalMaxGB() -> Double { repositories.filter { $0.enabled }.reduce(0) { $0 + $1.maxGB } }
+
+              func setEnabled(_ enabled: Bool, for repo: DownloadRepository) {
+                  guard let idx = repositories.firstIndex(where: { $0.id == repo.id }) else { return }
+                  repositories[idx] = DownloadRepository(id: repo.id, name: repo.name, feedURL: repo.feedURL, homepage: repo.homepage, enabled: enabled, maxGB: repo.maxGB)
+                  persistRepositories()
+              }
+
+              func resetQuotaUsage() {
+                  quota = DownloadQuota(id: quota.id, totalBytes: quota.totalBytes, usedBytes: 0)
+                  persistQuota()
+              }
+
+              func addUsedBytes(_ bytes: Int64) {
+                  let updated = DownloadQuota(id: quota.id, totalBytes: quota.totalBytes, usedBytes: quota.usedBytes + bytes)
+                  quota = updated
+                  persistQuota()
+              }
+
+              func updateTotalApps(_ count: Int) { totalAppsAvailable = count }
+
+              private func persistRepositories() {
+                  if let data = try? JSONEncoder().encode(repositories) { d.set(data, forKey: keyRepos) }
+              }
+
+              private func persistQuota() {
+                  if let data = try? JSONEncoder().encode(quota) { d.set(data, forKey: keyQuota) }
+              }
+          }
+          VIPEOF
+
+      # =============== الخطوة 9: نظام المفضلة (FavoritesStore.swift) ===============
+      - name: Generate FavoritesStore.swift
+        run: |
+          cat > FavoritesStore.swift << 'FAVEOF'
+          import Foundation
+          import SwiftUI
+
+          @MainActor
+          final class FavoritesStore: ObservableObject {
+              static let shared = FavoritesStore()
+              @Published private(set) var items: [StoreAPIApp] = []
+              private let key = "hassany.favorites.v1"
+              private let d = UserDefaults.standard
+
+              private init() { load() }
+
+              private func load() {
+                  guard let data = d.data(forKey: key),
+                        let decoded = try? JSONDecoder().decode([StoreAPIApp].self, from: data) else { return }
+                  items = decoded
+              }
+
+              private func save() {
+                  if let data = try? JSONEncoder().encode(items) { d.set(data, forKey: key) }
+              }
+
+              func contains(_ app: StoreAPIApp) -> Bool { items.contains(where: { $0.id == app.id }) }
+
+              func toggle(_ app: StoreAPIApp) {
+                  if contains(app) {
+                      items.removeAll { $0.id == app.id }
+                      HapticManager.shared.impact(.light)
+                  } else {
+                      items.insert(app, at: 0)
+                      HapticManager.shared.success()
+                  }
+                  save()
+              }
+
+              func remove(_ app: StoreAPIApp) {
+                  items.removeAll { $0.id == app.id }
+                  save()
+              }
+
+              func clearAll() {
+                  items.removeAll()
+                  save()
+              }
+          }
+
+          struct FavoriteButton: View {
+              let app: StoreAPIApp
+              var size: CGFloat = 40
+              @ObservedObject private var store = FavoritesStore.shared
+
+              var body: some View {
+                  let isFav = store.contains(app)
+                  Button {
+                      store.toggle(app)
+                  } label: {
+                      Image(systemName: isFav ? "heart.fill" : "heart")
+                          .font(.system(size: size * 0.45, weight: .bold))
+                          .foregroundColor(isFav ? .storeBg : .storeAccent)
+                          .frame(width: size, height: size)
+                          .background(
+                              Circle().fill(isFav ? Color.storeAccent : Color.storeCardAlt)
+                          )
+                          .overlay(Circle().stroke(isFav ? Color.clear : Color.storeDivider, lineWidth: 1))
+                  }
+                  .buttonStyle(.plain)
+                  .animation(.spring(), value: isFav)
+              }
+          }
+          FAVEOF
+
+      # =============== الخطوة 10: إدارة حساب المستخدم (AuthManager.swift) ===============
+      - name: Generate AuthManager.swift
+        run: |
+          cat > AuthManager.swift << 'VIPEOF'
+          import SwiftUI
+          import Foundation
+          import Combine
+
+          @MainActor
+          public final class AuthManager: ObservableObject {
+              public static let shared = MainActor.assumeIsolated { AuthManager() }
+
+              @Published var currentUser: AppUser?
+              @Published var isAuthenticated: Bool = false
+              @Published var isLoading: Bool = false
+              @Published var errorMessage: String?
+
+              private let userDefaultsKey = AppConstants.userDefaultsKey
+
+              public init() { loadUser() }
+
+              func login(phoneNumber: String, password: String) -> Bool {
+                  isLoading = true
+                  errorMessage = nil
+                  
+                  let users = loadAllUsers()
+                  guard let user = users.first(where: { $0.phoneNumber == phoneNumber && $0.password == password }) else {
+                      errorMessage = "رقم الجوال أو كلمة المرور غير صحيحة"
+                      isLoading = false
+                      return false
+                  }
+
+                  currentUser = user
+                  isAuthenticated = true
+                  isLoading = false
+                  HapticManager.shared.success()
+                  UserDefaults.standard.set(user.id.uuidString, forKey: "currentHassanyUserID")
+                  return true
+              }
+
+              func logout() {
+                  currentUser = nil
+                  isAuthenticated = false
+                  UserDefaults.standard.removeObject(forKey: "currentHassanyUserID")
+              }
+
+              private func loadUser() {
+                  guard let savedID = UserDefaults.standard.string(forKey: "currentHassanyUserID"),
+                        let id = UUID(uuidString: savedID) else { return }
+                  let users = loadAllUsers()
+                  if let user = users.first(where: { $0.id == id }) {
+                      currentUser = user
+                      isAuthenticated = true
+                  }
+              }
+
+              private func loadAllUsers() -> [AppUser] {
+                  guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+                        let users = try? JSONDecoder().decode([AppUser].self, from: data) else { return [] }
+                  return users
+              }
+          }
+          VIPEOF
+
+      # =============== الخطوة 11: نظام تفعيل كود الزبون (ActivationManager.swift) ===============
+      - name: Generate ActivationManager.swift
+        run: |
+          cat > ActivationManager.swift << 'ACTEOF'
+          import SwiftUI
+          import Foundation
+          import UIKit
+
+          @MainActor
+          public final class ActivationManager: ObservableObject {
+              public static let shared = MainActor.assumeIsolated { ActivationManager() }
+
+              public static let activationNameLink = "https://t.me/hassany_store"
+              public static let codesSiteBase = "https://project--9e6278b0-f5b2-4b14-9b4f-75f855f319c6.lovable.app"
+
+              @Published public private(set) var isActive: Bool = false
+              @Published public private(set) var code: String = ""
+              @Published public var isWorking: Bool = false
+              @Published public var lastError: String = ""
+
+              private let kCode = "hassany_code_v1"
+
+              private init() {
+                  code = UserDefaults.standard.string(forKey: kCode) ?? ""
+                  refreshLocalState()
+              }
+
+              @Published public var udid: String = UserDefaults.standard.string(forKey: "hassany_udid_v1") ?? "" {
+                  didSet {
+                      let clean = udid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                      UserDefaults.standard.set(clean, forKey: "hassany_udid_v1")
+                  }
+              }
+
+              public var deviceID: String {
+                  let clean = udid.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                  if !clean.isEmpty { return clean }
+                  return UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+              }
+
+              private func refreshLocalState() {
+                  isActive = !code.isEmpty
+              }
+
+              public func activate(code newCode: String, completion: ((Bool) -> Void)? = nil) {
+                  let clean = newCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                  guard clean.count >= 6 else {
+                      lastError = "أدخل كود اشتراك صحيح"
+                      completion?(false)
+                      return
+                  }
+                  
+                  isWorking = true
+                  lastError = ""
+                  
+                  // محاكاة الاتصال بالسيرفر لتفعيل الكود (يتم ربطه لاحقاً بـ Supabase)
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                      self.code = clean
+                      UserDefaults.standard.set(self.code, forKey: self.kCode)
+                      self.isActive = true
+                      self.isWorking = false
+                      HapticManager.shared.success()
+                      completion?(true)
+                  }
+              }
+          }
+
+          struct SubscriptionGateView: View {
+              @ObservedObject private var activation = ActivationManager.shared
+              @State private var input: String = ""
+              @FocusState private var focused: Bool
+
+              var body: some View {
+                  ZStack {
+                      Color.storeBg.ignoresSafeArea()
+
+                      VStack(alignment: .leading, spacing: 20) {
+                          VStack(alignment: .leading, spacing: 8) {
+                              Text("تفعيل Hassany Store")
+                                  .font(.system(size: 28, weight: .black))
+                                  .foregroundColor(.storePrimary)
+                              Text("أدخل رمز التفعيل والـ UDID للدخول للمتجر")
+                                  .font(.system(size: 14))
+                                  .foregroundColor(.storeSub)
+                          }
+                          .padding(.top, 40)
+
+                          VStack(alignment: .leading, spacing: 10) {
+                              Text("معرّف الجهاز (UDID)")
+                                  .font(.system(size: 14, weight: .bold))
+                                  .foregroundColor(.storeText)
+
+                              HStack(spacing: 10) {
+                                  TextField("ألصق UDID جهازك", text: $activation.udid)
+                                      .foregroundColor(.white)
+                                      .font(.system(size: 14, design: .monospaced))
+                                  
+                                  Button {
+                                      if let s = UIPasteboard.general.string { activation.udid = s }
+                                  } label: {
+                                      Text("لصق")
+                                          .font(.system(size: 13, weight: .bold))
+                                          .padding(.horizontal, 15)
+                                          .padding(.vertical, 8)
+                                          .background(Color.storeCardAlt)
+                                          .cornerRadius(8)
+                                  }
+                              }
+                              .padding(14)
+                              .background(Color.storeCard)
+                              .cornerRadius(12)
+                              .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.storeDivider, lineWidth: 1))
+                          }
+
+                          VStack(alignment: .leading, spacing: 10) {
+                              Text("كود التفعيل (VIP)")
+                                  .font(.system(size: 14, weight: .bold))
+                                  .foregroundColor(.storeText)
+
+                              TextField("أدخل كود الاشتراك", text: $input)
+                                  .foregroundColor(.storePrimary)
+                                  .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                  .focused($focused)
+                                  .padding(16)
+                                  .background(Color.storeCard)
+                                  .cornerRadius(12)
+                                  .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.storeDivider, lineWidth: 1))
+
+                              if !activation.lastError.isEmpty {
+                                  Text(activation.lastError)
+                                      .font(.system(size: 12, weight: .semibold))
+                                      .foregroundColor(.red)
+                              }
+                          }
+
+                          Button {
+                              focused = false
+                              activation.activate(code: input)
+                          } label: {
+                              HStack {
+                                  if activation.isWorking { ProgressView().tint(.black) }
+                                  Text(activation.isWorking ? "جارٍ التحقق..." : "دخول للمتجر")
+                                      .font(.system(size: 16, weight: .bold))
+                              }
+                              .foregroundColor(.storeBg)
+                              .frame(maxWidth: .infinity)
+                              .frame(height: 55)
+                              .background(GoldTheme.gradient)
+                              .cornerRadius(15)
+                              .shadow(color: Color.storePrimary.opacity(0.3), radius: 10, y: 5)
+                          }
+                          .disabled(activation.isWorking || input.isEmpty)
+
+                          Spacer()
+                      }
+                      .padding(.horizontal, 24)
+                  }
+              }
+          }
+
+          struct ActivationGateContainer<Content: View>: View {
+              @ObservedObject private var activation = ActivationManager.shared
+              private let content: () -> Content
+              init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
+
+              var body: some View {
+                  Group {
+                      if activation.isActive {
+                          content()
+                      } else {
+                          SubscriptionGateView()
+                      }
+                  }
+                  .animation(.easeInOut(duration: 0.35), value: activation.isActive)
+              }
+          }
+          ACTEOF
+
+      # =============== الخطوة 12: واجهة تسجيل الدخول (AuthViews.swift) ===============
+      - name: Generate AuthViews.swift
+        run: |
+          cat > AuthViews.swift << 'VIPEOF'
+          import SwiftUI
+
+          struct AuthView: View {
+              @StateObject private var authManager = AuthManager()
+
+              var body: some View {
+                  // بعد التفعيل، يدخل مباشرة للمتجر (سنربطها لاحقاً)
+                  ContentView(authManager: authManager)
+                      .transition(.opacity)
+              }
+          }
+          VIPEOF
+
