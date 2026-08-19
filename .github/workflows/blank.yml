@@ -1192,4 +1192,320 @@ jobs:
               }
           }
           VIPEOF
+                # =============== الخطوة 13: واجهة المتجر الرئيسية (StoreView.swift) ===============
+      - name: Generate StoreView.swift
+        run: |
+          cat > StoreView.swift << 'VIPEOF'
+          import SwiftUI
+          import WebKit
+
+          // مشغل البنرات التفاعلية (HTML/CSS)
+          struct HTMLContentView: UIViewRepresentable {
+              let html: String
+              func makeUIView(context: Context) -> WKWebView {
+                  let wv = WKWebView()
+                  wv.isOpaque = false
+                  wv.backgroundColor = .clear
+                  wv.scrollView.isScrollEnabled = false
+                  wv.loadHTMLString(html, baseURL: nil)
+                  return wv
+              }
+              func updateUIView(_ uiView: WKWebView, context: Context) {}
+          }
+
+          struct HomeHTML {
+              static func vipBanner(title: String, subtitle: String) -> String {
+                  return """
+                  <!doctype html><html dir="rtl"><head><meta name="viewport" content="width=device-width, initial-scale=1">
+                  <style>
+                  body { margin:0; padding:0; font-family: -apple-system, sans-serif; color: #fff; background: transparent; }
+                  .card {
+                      position: absolute; inset: 0; border-radius: 22px; overflow: hidden;
+                      background: linear-gradient(135deg, #1A1A24, #000);
+                      border: 1px solid rgba(255, 215, 0, 0.3); display: flex; flex-direction: column; justify-content: center; padding: 20px;
+                  }
+                  .glow {
+                      position: absolute; left: -50px; top: -50px; width: 150px; height: 150px; border-radius: 50%;
+                      background: rgba(255, 215, 0, 0.4); filter: blur(40px); animation: pulse 4s infinite alternate;
+                  }
+                  .cyan-glow {
+                      position: absolute; right: -30px; bottom: -30px; width: 100px; height: 100px; border-radius: 50%;
+                      background: rgba(0, 255, 255, 0.3); filter: blur(30px);
+                  }
+                  @keyframes pulse { 0% { transform: scale(1); } 100% { transform: scale(1.2); } }
+                  h1 { font-size: 24px; font-weight: 900; margin: 0 0 5px 0; text-shadow: 0 4px 10px rgba(0,0,0,0.5); z-index: 2; color: #FFD700; }
+                  p { font-size: 13px; margin: 0; opacity: 0.8; z-index: 2; }
+                  .badge {
+                      align-self: flex-start; background: rgba(255,255,255,0.1); padding: 5px 12px; border-radius: 20px;
+                      font-size: 11px; font-weight: bold; margin-bottom: 10px; z-index: 2; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px);
+                  }
+                  </style></head><body>
+                  <div class="card"><div class="glow"></div><div class="cyan-glow"></div>
+                  <div class="badge">👑 نسخة البريميوم</div>
+                  <h1>\(title)</h1><p>\(subtitle)</p></div>
+                  </body></html>
+                  """
+              }
+          }
+
+          struct StoreRootView: View {
+              @State private var selectedTab = 0
+              
+              var body: some View {
+                  TabView(selection: $selectedTab) {
+                      StoreHomeView()
+                          .tabItem { Label("الرئيسية", systemImage: "house.fill") }
+                          .tag(0)
+                      
+                      FavoritesTab()
+                          .tabItem { Label("المفضلة", systemImage: "heart.fill") }
+                          .tag(1)
+                      
+                      AppsListTab()
+                          .tabItem { Label("التطبيقات", systemImage: "square.grid.2x2.fill") }
+                          .tag(2)
+                  }
+                  .accentColor(Color.storePrimary) // ذهبي
+              }
+          }
+
+          struct StoreHomeView: View {
+              @StateObject private var feed = RepositoriesStore.shared
+              
+              var body: some View {
+                  NavigationView {
+                      ZStack {
+                          Color.storeBg.ignoresSafeArea()
+                          
+                          ScrollView(showsIndicators: false) {
+                              VStack(spacing: 20) {
+                                  // الهيدر
+                                  HStack {
+                                      Text("Hassany Store")
+                                          .font(.system(size: 26, weight: .heavy))
+                                          .foregroundColor(.white)
+                                      Spacer()
+                                      Image(systemName: "crown.fill")
+                                          .font(.title2)
+                                          .foregroundColor(Color.storePrimary)
+                                  }
+                                  .padding(.horizontal, 20)
+                                  .padding(.top, 10)
+
+                                  // البنر الاحترافي
+                                  HTMLContentView(html: HomeHTML.vipBanner(title: "أقوى تطبيقات البلس", subtitle: "تحديث يومي للتطبيقات، بدون كمبيوتر، آمن 100%"))
+                                      .frame(height: 160)
+                                      .padding(.horizontal, 20)
+
+                                  // قسم التطبيقات المميزة
+                                  HStack {
+                                      Text("حصرياً لك")
+                                          .font(.system(size: 18, weight: .bold))
+                                          .foregroundColor(.white)
+                                      Spacer()
+                                  }
+                                  .padding(.horizontal, 20)
+
+                                  // ديمو لتطبيقات معروضة كزجاج
+                                  VStack(spacing: 15) {
+                                      DemoAppRow(name: "8 Ball Pool Plus", category: "ألعاب معدلة", size: "105 MB", icon: "🎱")
+                                      DemoAppRow(name: "TikTok Dark", category: "تواصل اجتماعي", size: "140 MB", icon: "🎵")
+                                      DemoAppRow(name: "WhatsApp Gold", category: "محادثات", size: "90 MB", icon: "💬")
+                                  }
+                                  .padding(.horizontal, 20)
+                                  .padding(.bottom, 30)
+                              }
+                          }
+                      }
+                      .navigationBarHidden(true)
+                  }
+              }
+          }
+
+          struct DemoAppRow: View {
+              let name: String
+              let category: String
+              let size: String
+              let icon: String
+              
+              var body: some View {
+                  HStack(spacing: 15) {
+                      ZStack {
+                          RoundedRectangle(cornerRadius: 16).fill(Color.storeCardAlt).frame(width: 60, height: 60)
+                          Text(icon).font(.system(size: 30))
+                      }
+                      
+                      VStack(alignment: .leading, spacing: 4) {
+                          Text(name).font(.system(size: 16, weight: .bold)).foregroundColor(.storeText)
+                          HStack {
+                              Text(category).font(.system(size: 12)).foregroundColor(.storeAccent)
+                              Text("•").foregroundColor(.storeSub)
+                              Text(size).font(.system(size: 12, weight: .semibold)).foregroundColor(.storeSub)
+                          }
+                      }
+                      Spacer()
+                      
+                      Button {
+                          HapticManager.shared.success()
+                      } label: {
+                          Text("تثبيت")
+                              .font(.system(size: 13, weight: .bold))
+                              .foregroundColor(.storeBg)
+                              .padding(.horizontal, 16).padding(.vertical, 8)
+                              .background(GoldTheme.gradient)
+                              .cornerRadius(20)
+                      }
+                  }
+                  .padding(15)
+                  .glassCard(radius: 22)
+              }
+          }
+
+          struct FavoritesTab: View {
+              var body: some View {
+                  ZStack {
+                      Color.storeBg.ignoresSafeArea()
+                      VStack {
+                          Text("قائمة المفضلة").font(.title2.bold()).foregroundColor(.white).padding(.top)
+                          Spacer()
+                          Image(systemName: "heart.slash").font(.system(size: 50)).foregroundColor(.storeSub)
+                          Text("لا توجد تطبيقات في المفضلة").foregroundColor(.storeSub).padding(.top, 10)
+                          Spacer()
+                      }
+                  }
+              }
+          }
+
+          struct AppsListTab: View {
+              var body: some View {
+                  ZStack {
+                      Color.storeBg.ignoresSafeArea()
+                      VStack {
+                          Text("جميع التطبيقات").font(.title2.bold()).foregroundColor(.white).padding(.top)
+                          Spacer()
+                          Image(systemName: "square.grid.2x2").font(.system(size: 50)).foregroundColor(.storeSub)
+                          Text("سيتم جلب التطبيقات من قاعدة البيانات").foregroundColor(.storeSub).padding(.top, 10)
+                          Spacer()
+                      }
+                  }
+              }
+          }
+          VIPEOF
+
+      # =============== الخطوة 14: تتبع حالة الشبكة (StatusScreens.swift) ===============
+      - name: Generate StatusScreens.swift
+        run: |
+          cat > StatusScreens.swift << 'STATUSEOF'
+          import SwiftUI
+          import Network
+
+          @MainActor
+          final class StatusCenter: ObservableObject {
+              static let shared = StatusCenter()
+              @Published var isOnline: Bool = true
+              private let monitor = NWPathMonitor()
+              private let queue = DispatchQueue(label: "NetworkMonitor")
+
+              private init() {
+                  monitor.pathUpdateHandler = { path in
+                      DispatchQueue.main.async { self.isOnline = path.status == .satisfied }
+                  }
+                  monitor.start(queue: queue)
+              }
+          }
+          STATUSEOF
+
+      # =============== الخطوة 15: نقطة البداية وتشغيل التطبيق ===============
+      - name: Generate App Entry Point
+        run: |
+          cat > ContentView.swift << 'MAINEOF'
+          import SwiftUI
+
+          struct ContentView: View {
+              @ObservedObject var authManager: AuthManager
+              var body: some View {
+                  StoreRootView()
+              }
+          }
+          MAINEOF
+
+          cat > HassanyStoreApp.swift << 'APPEOF'
+          import SwiftUI
+
+          @main
+          struct HassanyStoreApp: App {
+              init() {
+                  let nav = UINavigationBarAppearance()
+                  nav.configureWithOpaqueBackground()
+                  nav.backgroundColor = UIColor(Color.storeBg)
+                  UINavigationBar.appearance().standardAppearance = nav
+                  
+                  let tab = UITabBarAppearance()
+                  tab.configureWithOpaqueBackground()
+                  tab.backgroundColor = UIColor(Color.storeCard)
+                  UITabBar.appearance().standardAppearance = tab
+              }
+
+              var body: some Scene {
+                  WindowGroup {
+                      // بوابـة التفعيل: إذا الكود مفعل يدخل للمتجر، إذا لا يطلب الـ UDID والكود
+                      ActivationGateContainer {
+                          ContentView(authManager: AuthManager.shared)
+                      }
+                      .environment(\.layoutDirection, .rightToLeft) // فرض اللغة العربية (RTL)
+                      .preferredColorScheme(.dark) // فرض الوضع الليلي الملكي
+                  }
+              }
+          }
+          APPEOF
+
+      # =============== الخطوة 16: تجميع الكود (Compile with swiftc) ===============
+      - name: Compile Application (Build)
+        run: |
+          echo "=== جاري تجميع تطبيق Hassany Store ==="
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          xcrun swiftc \
+            Constants.swift \
+            Models.swift \
+            ImageCache.swift \
+            Repositories.swift \
+            FavoritesStore.swift \
+            AuthManager.swift \
+            ActivationManager.swift \
+            AuthViews.swift \
+            HapticManager.swift \
+            StoreView.swift \
+            StatusScreens.swift \
+            ContentView.swift \
+            HassanyStoreApp.swift \
+            -sdk "$SDK" \
+            -target arm64-apple-ios15.0 \
+            -O -module-name HassanyStore \
+            -framework SwiftUI -framework UIKit -framework Foundation -framework WebKit -framework Network \
+            -o build-output/HassanyStoreApp
+            
+          echo "✅ تم تجميع الكود بنجاح!"
+
+      # =============== الخطوة 17: بناء ملف الـ IPA ===============
+      - name: Package into IPA
+        run: |
+          echo "=== تحزيم التطبيق وصناعة الـ IPA ==="
+          mkdir -p build-output/Payload/HassanyStore.app
+          cp build-output/HassanyStoreApp build-output/Payload/HassanyStore.app/
+          cp Resources/Info.plist build-output/Payload/HassanyStore.app/
+          
+          cd build-output
+          # ضغط المجلد إلى صيغة ipa
+          zip -r -q HassanyStore_VIP.ipa Payload
+          echo "✅ تم تجهيز HassanyStore_VIP.ipa للاستخدام"
+
+      # =============== الخطوة 18: رفع الـ IPA للتحميل (Artifact) ===============
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HassanyStore_VIP_Edition
+          path: build-output/HassanyStore_VIP.ipa
+          retention-days: 7
+
 
